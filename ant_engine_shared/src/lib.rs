@@ -7,8 +7,18 @@ pub enum Command {
     Stop,
 }
 
+pub struct State {
+    value: i32,
+}
+
+impl State {
+    pub fn new() -> State {
+        State { value: 0 }
+    }
+}
+
 pub struct Game {
-    state: i32,
+    state: State,
     step: usize,
     command_channel: mpsc::Receiver<Command>,
     running: bool,
@@ -26,7 +36,7 @@ impl Game {
     fn step(&mut self, commands: Vec<Command>) {
         for command in commands {
             match command {
-                Command::Add(value) => self.state += value,
+                Command::Add(value) => self.state.value += value,
                 Command::Stop => {
                     println!("Game stopped at step {}", self.step);
                     self.running = false;
@@ -64,7 +74,7 @@ impl GameHandler {
 impl Game {
     fn new(rx: mpsc::Receiver<Command>) -> Game {
         Game {
-            state: 0,
+            state: State::new(),
             step: 0,
             command_channel: rx,
             running: true,
