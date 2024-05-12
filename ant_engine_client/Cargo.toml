@@ -1,0 +1,7 @@
+[package]
+name = "ant_engine_client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ant_engine_shared = { path = "../ant_engine_shared" }
