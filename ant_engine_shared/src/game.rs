@@ -1,12 +1,7 @@
 use serde::{Deserialize, Serialize};
+use crate::networking::{Command, Message};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
-
-#[derive(Debug, PartialEq, Serialize, Deserialize)]
-pub enum Command {
-    Add(i32),
-    Stop,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {

@@ -1,8 +1,13 @@
-use crate::game::Command;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
+pub enum Command {
+    Add(i32),
+    Stop,
+}
+
 #[derive(Serialize, Deserialize)]
-struct Message {
+pub struct Message {
     command: Command,
     step: u32,
 }
