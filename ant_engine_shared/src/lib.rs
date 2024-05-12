@@ -50,6 +50,17 @@ pub struct GameHandler {
     command_channel: Sender<Command>,
 }
 
+impl GameHandler {
+    pub fn send(&self, command: Command) {
+        self.command_channel.send(command).unwrap();
+    }
+
+    pub fn stop(self) {
+        self.send(Command::Stop);
+        self.thread.join().unwrap();
+    }
+}
+
 impl Game {
     fn new(rx: mpsc::Receiver<Command>) -> Game {
         Game {
@@ -99,9 +110,8 @@ mod tests {
     #[test]
     fn start_stop_game() {
         let game_handler = Game::start();
-        game_handler.command_channel.send(Command::Add(2)).unwrap();
-        game_handler.command_channel.send(Command::Add(3)).unwrap();
-        game_handler.command_channel.send(Command::Stop).unwrap();
-        game_handler.thread.join().unwrap();
+        game_handler.send(Command::Add(2));
+        game_handler.send(Command::Add(3));
+        game_handler.stop();
     }
 }
