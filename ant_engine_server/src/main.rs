@@ -1,4 +1,4 @@
-use ant_engine_shared::{Game, Command};
+use ant_engine_shared::game::{Game, Command};
 use std::net::UdpSocket;
 
 fn main() {

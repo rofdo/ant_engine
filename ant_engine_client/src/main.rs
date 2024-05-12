@@ -1,4 +1,4 @@
-use ant_engine_shared::Game;
+use ant_engine_shared::game::{Game, Command};
 
 fn main() {
     let game_handler = Game::start();
@@ -24,7 +24,7 @@ fn main() {
                         continue;
                     }
                 };
-                game_handler.send(ant_engine_shared::Command::Add(num)).unwrap();
+                game_handler.send(Command::Add(num)).unwrap();
             }
         }
     }
