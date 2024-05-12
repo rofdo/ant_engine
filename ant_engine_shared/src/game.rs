@@ -1,8 +1,8 @@
-
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum Command {
     Add(i32),
     Stop,
@@ -11,11 +11,12 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {
     test_value: i32,
+    step: usize,
 }
 
 impl State {
     pub fn new() -> State {
-        State { test_value: 0 }
+        State { test_value: 0, step: 0 }
     }
 
     pub fn add_value(&mut self, value: i32) {
@@ -26,7 +27,6 @@ impl State {
 pub struct Game {
     running: bool,
     state: State,
-    step: usize,
     command_channel: Receiver<Command>,
     state_channel: Sender<State>,
 }
@@ -45,13 +45,13 @@ impl Game {
             match command {
                 Command::Add(value) => self.state.add_value(value),
                 Command::Stop => {
-                    println!("Game stopped at step {}", self.step);
+                    println!("Game stopped at step {}", self.state.step);
                     self.running = false;
                     return;
                 }
             }
         }
-        self.step += 1;
+        self.state.step += 1;
     }
 
     fn send_state(&self) {
@@ -60,9 +60,12 @@ impl Game {
 
     fn run(&mut self) {
         while self.running {
+            let time = std::time::Instant::now();
             let commands = self.receive_commands();
             self.step(commands);
             self.send_state();
+            // Sleep to keep the game running at 60 TPS
+            thread::sleep(std::time::Duration::from_millis(1000 / 60) - time.elapsed());
         }
     }
 }
@@ -75,7 +78,9 @@ pub struct GameHandler {
 
 impl GameHandler {
     pub fn send(&self, command: Command) -> Result<(), Box<dyn std::error::Error>> {
-        self.command_channel.send(command).map_err(|_| "Failed to send command".into())
+        self.command_channel
+            .send(command)
+            .map_err(|_| "Failed to send command".into())
     }
 
     pub fn stop(self) -> Result<(), Box<dyn std::error::Error>> {
@@ -85,7 +90,9 @@ impl GameHandler {
     }
 
     pub fn last_state(&self) -> Result<State, Box<dyn std::error::Error>> {
-        self.state_channel.recv().map_err(|_| "Failed to receive state".into())
+        self.state_channel
+            .recv()
+            .map_err(|_| "Failed to receive state".into())
     }
 }
 
@@ -94,7 +101,6 @@ impl Game {
         Game {
             running: true,
             state: State::new(),
-            step: 0,
             command_channel: command_rx,
             state_channel: state_tx,
         }
@@ -146,7 +152,7 @@ mod tests {
         let game_handler = Game::start();
         game_handler.send(Command::Add(2)).unwrap();
         let state = game_handler.last_state().unwrap();
-        assert_eq!(state, State { test_value: 2 });
+        assert_eq!(state, State { test_value: 2 , step: 1});
         game_handler.stop().unwrap();
     }
 }
