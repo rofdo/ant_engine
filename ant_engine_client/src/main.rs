@@ -12,6 +12,10 @@ fn main() {
                 game_handler.stop().unwrap();
                 break;
             }
+            "view" => {
+                let state = game_handler.last_state().unwrap();
+                println!("State: {:?}", state);
+            }
             _ => {
                 let num: i32 = match trimmed.parse() {
                     Ok(num) => num,
