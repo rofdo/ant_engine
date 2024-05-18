@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 ant_engine_shared = { path = "../ant_engine_shared" }
+bincode = "1.3.3"
+serde = { version = "1.0.202", features = ["derive"] }

@@ -1,5 +1,7 @@
-use ant_engine_shared::game::{Game, Command};
+use ant_engine_shared::game::Game;
+use ant_engine_shared::networking::Command;
 use std::net::UdpSocket;
+use serde::{Deserialize, Serialize};
 
 fn main() {
     let game_handler = Game::start();
@@ -18,7 +20,8 @@ fn main() {
         // Receive data
         match socket.recv_from(&mut buf) {
             Ok((n, src)) => {
-                let command = std::str::from_utf8(&buf[..n]).unwrap();
+                let command: Command = bincode::deserialize(&buf[..n]).unwrap();
+                println!("Received command: {:?}", command);
             }
             Err(e) => {
                 eprintln!("Error receiving data: {}", e);
