@@ -74,6 +74,23 @@ pub struct GameHandle {
 }
 
 impl GameHandle {
+    pub fn new() -> GameHandle {
+        let (command_sender, command_receiver) = mpsc::channel();
+        let (state_sender, state_receiver) = mpsc::channel();
+        let mut game = Game {
+            running: false,
+            state: State::new(),
+            command_receiver,
+            state_sender,
+        };
+        let thread_handle = thread::spawn(move || game.run());
+        GameHandle {
+            command_sender,
+            state_receiver,
+            thread_handle,
+        }
+    }
+
     pub fn send_command(&self, command: GameCommand) -> Result<(), mpsc::SendError<GameCommand>> {
         self.command_sender.send(command)
     }
@@ -98,20 +115,7 @@ mod tests {
 
     #[test]
     fn test_game() {
-        let (command_sender, command_receiver) = mpsc::channel();
-        let (state_sender, state_receiver) = mpsc::channel();
-        let mut game = Game {
-            running: false,
-            state: State::new(),
-            command_receiver,
-            state_sender,
-        };
-        let thread_handle = thread::spawn(move || game.run());
-        let game_handle = GameHandle {
-            command_sender,
-            state_receiver,
-            thread_handle,
-        };
+        let game_handle = GameHandle::new();
         game_handle.send_command(GameCommand::TestAdd(1)).unwrap();
         game_handle.send_command(GameCommand::TestMul(2)).unwrap();
         let state = game_handle.receive_state().unwrap();
