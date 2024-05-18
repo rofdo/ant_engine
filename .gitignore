@@ -1,7 +1,8 @@
-*.lock
+*/*.lock
 ant_engine_client/target
 ant_engine_server/target
 ant_engine_shared/target
 ant_engine_shared/Cargo.lock
 ant_engine_server/Cargo.lock
 ant_engine_client/Cargo.lock
+ant_engine/target

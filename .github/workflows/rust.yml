@@ -17,8 +17,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build shared
-      working-directory: ./ant_engine_shared
+      working-directory: ./ant_engine
       run: cargo build --verbose
     - name: Run tests shared
-      working-directory: ./ant_engine_shared
+      working-directory: ./ant_engine
       run: cargo test --verbose
