@@ -3,7 +3,6 @@ use bincode;
 use serde::{Deserialize, Serialize};
 use std::net::UdpSocket;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
