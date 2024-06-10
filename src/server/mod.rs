@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::net::UdpSocket;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use log::warn;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 enum Message {
@@ -85,13 +86,40 @@ impl Networker {
     }
 }
 
+pub fn start_server(adress: String) {
+    let networker = NetworkerHandle::new(adress);
+    let game = crate::shared::game::GameHandle::new();
+    let mut running = true;
+    while running {
+        let commands = networker.receive_commands();
+        for command in commands {
+            if command == GameCommand::Quit {
+                running = false;
+            }
+            match game.send_command(command) {
+                Ok(_) => (),
+                Err(e) => warn!("Error sending command: {}", e),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::exit;
 
     #[test]
     fn test_networker() {
         let address = "127.0.0.1:12345".to_string();
         let networker = NetworkerHandle::new(address);
+    }
+
+    #[test]
+    fn test_start_server() {
+        let address = "127.0.0.1.12345".to_string();
+        start_server(address);
+        // send quit message
+        let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind socket");
     }
 }

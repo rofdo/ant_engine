@@ -106,6 +106,7 @@ impl GameHandle {
             .unwrap_or_else(|_| warn!("Error joining thread"));
         Ok(())
     }
+
 }
 
 // unit tests
