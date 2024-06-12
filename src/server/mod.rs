@@ -1,28 +1,28 @@
 #![allow(dead_code)]
+pub mod game_server;
 mod lobby;
-mod game_server;
 
+use crate::shared::protocols::{DistributorClientMessages, DistributorServerMessages};
+use lobby::lobby_code;
 use std::net::SocketAddr;
 use std::sync::mpsc::Sender;
-use lobby::lobby_code;
+use std::io::Write;
 
-struct Distributer {
+pub struct Distributer {
     free: Vec<SocketAddr>,
     main: SocketAddr,
-    lobbies: Vec<(std::thread::JoinHandle<()>, Sender<()>)>,
+    lobbies: Vec<(std::thread::JoinHandle<()>, Sender<()>, SocketAddr)>,
 }
 
 impl Distributer {
-    fn new(main: SocketAddr) -> Distributer {
+    pub fn new(addresses: Vec<SocketAddr>) -> Distributer {
+        let main = addresses[0];
+        let free = addresses[1..].to_vec();
         Distributer {
-            free: Vec::new(),
+            free,
             main,
             lobbies: Vec::new(),
         }
-    }
-
-    fn add_free_socket(&mut self, addr: SocketAddr) {
-        self.free.push(addr);
     }
 
     fn try_open_lobby(&mut self) -> Result<usize, Box<dyn std::error::Error>> {
@@ -37,9 +37,47 @@ impl Distributer {
             lobby_code(tcp_socket, udp_socket, rx);
         });
 
-        self.lobbies.push((handle, tx));
+        self.lobbies.push((handle, tx, tcp_socket));
 
         Ok(self.lobbies.len() - 1)
+    }
+
+    pub fn run(self) {
+        // listen on the main socket for new connections over tcp
+        let listener = std::net::TcpListener::bind(self.main).unwrap();
+        let thread_safe_self = std::sync::Arc::new(std::sync::Mutex::new(self));
+        while let Ok((mut stream, _)) = listener.accept() {
+            let thread_safe_clone = thread_safe_self.clone();
+            let _ = std::thread::spawn(move || {
+                let distributer = thread_safe_clone;
+                while let Ok(message) = bincode::deserialize_from(stream.try_clone().unwrap()) {
+                    match message {
+                        DistributorClientMessages::AskForLobbies => {
+                            let lock = distributer.lock().unwrap();
+                            let lobbies = lock.lobbies.iter().map(|(_, _, addr)| *addr).collect();
+                            drop(lock);
+
+                            // send the lobbies to the client
+                            let message = DistributorServerMessages::Lobbies(lobbies);
+                            stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
+                        }
+                        DistributorClientMessages::OpenLobby => {
+                            let mut lock = distributer.lock().unwrap();
+                            let lobby = match lock.try_open_lobby() {
+                                Ok(lobby) => lobby,
+                                Err(e) => {
+                                    eprintln!("Error opening lobby: {}", e);
+                                    continue;
+                                }
+                            };
+                            let message = DistributorServerMessages::LobbyOpened(lock.lobbies[lobby].2);
+                            drop(lock);
+                            stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
+                        }
+                    }
+                }
+            });
+        }
     }
 }
 

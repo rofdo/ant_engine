@@ -1,3 +1,5 @@
+use log::{debug, error, info};
+
 use crate::server::game_server::game_server;
 use std::net::SocketAddr;
 use std::sync::mpsc::Receiver;
@@ -16,27 +18,10 @@ pub fn lobby_code(
     // open tcp
     let tcp_listener = std::net::TcpListener::bind(tcp_addr)?;
     while stop.try_recv().is_err() {
-        let (stream, _) = match tcp_listener.accept() {
-            Ok((stream, addr)) => {
-                println!("New TCP connection: {:?}", addr);
-                (stream, addr)
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // No new connections, just continue the loop
-                continue;
-            }
-            Err(e) => {
-                println!("TCP accept error: {}", e);
-                continue;
-            }
-        };
-
-        // handle the stream
-        let mut buf = [0; 1024];
+        let streams = tcp_listener.incoming().take_while(|v| v.is_ok());
     }
-    panic!("Not implemented");
-    tx.send(())?;
-    return Ok(());
+    tx.send(()).unwrap();
+    info!("Waiting for game server to finish");
     game_server
         .join()
         .expect("Failed to join game server thread");
@@ -51,6 +36,7 @@ mod tests {
 
     #[test]
     fn test_lobby_code() {
+        env_logger::init();
         let (tx, rx) = channel();
         let tcp_addr: SocketAddr = ADDRESSES[5].parse().unwrap();
         let udp_addr: SocketAddr = ADDRESSES[3].parse().unwrap();
@@ -60,13 +46,6 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(1));
         let tcp_stream = std::net::TcpStream::connect(ADDRESSES[5]).unwrap();
         std::thread::sleep(std::time::Duration::from_secs(1));
-        tx.send(()).unwrap();
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        tx.send(()).unwrap();
-        tx.send(()).unwrap();
-        tx.send(()).unwrap();
-        tx.send(()).unwrap();
-        tx.send(()).unwrap();
         tx.send(()).unwrap();
         handle.join().unwrap();
     }
