@@ -1,71 +1,73 @@
+use crate::server::game_server::game_server;
 use std::net::SocketAddr;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
-struct Distributer {
-    free: Vec<SocketAddr>,
-    main: SocketAddr,
-    lobbies: Vec<(std::thread::JoinHandle<()>, Sender<()>)>,
-}
+pub fn lobby_code(
+    tcp_addr: SocketAddr,
+    udp_addr: SocketAddr,
+    stop: Receiver<()>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // open game server thread
+    let (tx, rx) = std::sync::mpsc::channel();
+    let game_server = std::thread::spawn(move || {
+        game_server(udp_addr, rx);
+    });
 
-impl Distributer {
-    fn new(main: SocketAddr) -> Distributer {
-        Distributer {
-            free: Vec::new(),
-            main,
-            lobbies: Vec::new(),
-        }
-    }
-
-    fn add_free_socket(&mut self, addr: SocketAddr) {
-        self.free.push(addr);
-    }
-
-    fn try_open_lobby(&mut self) -> Result<usize, Box<dyn std::error::Error>> {
-        if self.free.len() < 2 {
-            return Err("Not enough free sockets".into());
-        }
-        let tcp_socket = self.free.pop().unwrap();
-        let udp_socket = self.free.pop().unwrap();
-
-        let (tx, rx) = std::sync::mpsc::channel();
-        let handle = std::thread::spawn(move || {
-            lobby_code(tcp_socket, udp_socket, rx);
-        });
-
-        self.lobbies.push((handle, tx));
-
-        Ok(self.lobbies.len() - 1)
-    }
-}
-
-fn lobby_code(tcp_addr: SocketAddr, udp_addr: SocketAddr, receiver: Receiver<()>) {
-    while receiver.try_recv().is_err() {
-        // read udp
-        let udp_socket = std::net::UdpSocket::bind(udp_addr).unwrap();
-        let mut buf = [0; 1024];
-        match udp_socket.recv_from(&mut buf) {
-            Ok((size, src)) => {
-                let message = &buf[..size];
-                println!("Received: {:?}", String::from_utf8_lossy(message));
-                udp_socket.send_to(message, src).expect("Failed to send a response");
+    // open tcp
+    let tcp_listener = std::net::TcpListener::bind(tcp_addr)?;
+    while stop.try_recv().is_err() {
+        let (stream, _) = match tcp_listener.accept() {
+            Ok((stream, addr)) => {
+                println!("New TCP connection: {:?}", addr);
+                (stream, addr)
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // No data received, just continue the loop
+                // No new connections, just continue the loop
                 continue;
             }
             Err(e) => {
-                eprintln!("recv_from error: {}", e);
-                break;
+                println!("TCP accept error: {}", e);
+                continue;
             }
-        }
+        };
+
+        // handle the stream
+        let mut buf = [0; 1024];
     }
+    panic!("Not implemented");
+    tx.send(())?;
+    return Ok(());
+    game_server
+        .join()
+        .expect("Failed to join game server thread");
+    Ok(())
 }
 
 #[cfg(test)]
-mod server_tests {
+mod tests {
     use super::*;
+    use crate::utils::ADDRESSES;
+    use std::sync::mpsc::channel;
+
     #[test]
-    fn test_distributer() {
-        let main = "0.0.0.0:0";
+    fn test_lobby_code() {
+        let (tx, rx) = channel();
+        let tcp_addr: SocketAddr = ADDRESSES[5].parse().unwrap();
+        let udp_addr: SocketAddr = ADDRESSES[3].parse().unwrap();
+        let handle = std::thread::spawn(move || {
+            lobby_code(tcp_addr, udp_addr, rx).unwrap();
+        });
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let tcp_stream = std::net::TcpStream::connect(ADDRESSES[5]).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        tx.send(()).unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        handle.join().unwrap();
     }
 }
