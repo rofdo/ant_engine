@@ -4,9 +4,10 @@ mod lobby;
 
 use crate::shared::protocols::{DistributorClientMessages, DistributorServerMessages};
 use lobby::lobby_code;
-use std::net::SocketAddr;
-use std::sync::mpsc::Sender;
 use std::io::Write;
+use std::net::{SocketAddr, TcpStream};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 pub struct Distributer {
     free: Vec<SocketAddr>,
@@ -46,37 +47,44 @@ impl Distributer {
         // listen on the main socket for new connections over tcp
         let listener = std::net::TcpListener::bind(self.main).unwrap();
         let thread_safe_self = std::sync::Arc::new(std::sync::Mutex::new(self));
-        while let Ok((mut stream, _)) = listener.accept() {
+        while let Ok((stream, _)) = listener.accept() {
             let thread_safe_clone = thread_safe_self.clone();
             let _ = std::thread::spawn(move || {
-                let distributer = thread_safe_clone;
-                while let Ok(message) = bincode::deserialize_from(stream.try_clone().unwrap()) {
-                    match message {
-                        DistributorClientMessages::AskForLobbies => {
-                            let lock = distributer.lock().unwrap();
-                            let lobbies = lock.lobbies.iter().map(|(_, _, addr)| *addr).collect();
-                            drop(lock);
-
-                            // send the lobbies to the client
-                            let message = DistributorServerMessages::Lobbies(lobbies);
-                            stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
-                        }
-                        DistributorClientMessages::OpenLobby => {
-                            let mut lock = distributer.lock().unwrap();
-                            let lobby = match lock.try_open_lobby() {
-                                Ok(lobby) => lobby,
-                                Err(e) => {
-                                    eprintln!("Error opening lobby: {}", e);
-                                    continue;
-                                }
-                            };
-                            let message = DistributorServerMessages::LobbyOpened(lock.lobbies[lobby].2);
-                            drop(lock);
-                            stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
-                        }
-                    }
-                }
+                handle_stream(stream, thread_safe_clone);
             });
+        }
+    }
+}
+
+fn handle_stream(mut stream: TcpStream, distributer: Arc<Mutex<Distributer>>) {
+    while let Ok(message) = bincode::deserialize_from(stream.try_clone().unwrap()) {
+        match message {
+            DistributorClientMessages::AskForLobbies => {
+                let lock = distributer.lock().unwrap();
+                let lobbies = lock.lobbies.iter().map(|(_, _, addr)| *addr).collect();
+                drop(lock);
+
+                // send the lobbies to the client
+                let message = DistributorServerMessages::Lobbies(lobbies);
+                stream
+                    .write_all(&bincode::serialize(&message).unwrap())
+                    .unwrap();
+            }
+            DistributorClientMessages::OpenLobby => {
+                let mut lock = distributer.lock().unwrap();
+                let lobby = match lock.try_open_lobby() {
+                    Ok(lobby) => lobby,
+                    Err(e) => {
+                        eprintln!("Error opening lobby: {}", e);
+                        continue;
+                    }
+                };
+                let message = DistributorServerMessages::LobbyOpened(lock.lobbies[lobby].2);
+                drop(lock);
+                stream
+                    .write_all(&bincode::serialize(&message).unwrap())
+                    .unwrap();
+            }
         }
     }
 }
@@ -84,8 +92,28 @@ impl Distributer {
 #[cfg(test)]
 mod server_tests {
     use super::*;
+    use std::thread;
+    use crate::utils::ADDRESSES;
     #[test]
     fn test_distributer() {
-        let main = "0.0.0.0:0";
+        let distributer = Distributer::new(ADDRESSES[0..3].iter().map(|v| v.parse().unwrap()).collect());
+        let _ = thread::spawn(move || {
+            distributer.run();
+        });
+
+        thread::sleep(std::time::Duration::from_secs(1));
+
+        let mut client_stream = TcpStream::connect(ADDRESSES[0]).unwrap();
+        let message = DistributorClientMessages::AskForLobbies;
+        client_stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
+        let message: DistributorServerMessages = bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
+        assert_eq!(message, DistributorServerMessages::Lobbies(vec![]));
+
+        // open a lobby
+        let message = DistributorClientMessages::OpenLobby;
+        client_stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
+        thread::sleep(std::time::Duration::from_secs(1));
+        let message: DistributorServerMessages = bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
+        assert_eq!(message, DistributorServerMessages::LobbyOpened(ADDRESSES[2].parse().unwrap()));
     }
 }
