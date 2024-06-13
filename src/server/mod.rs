@@ -4,6 +4,7 @@ mod lobby;
 
 use crate::shared::protocols::{DistributorClientMessages, DistributorServerMessages};
 use lobby::lobby_code;
+use log::error;
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::Sender;
@@ -75,7 +76,7 @@ fn handle_stream(mut stream: TcpStream, distributer: Arc<Mutex<Distributer>>) {
                 let lobby = match lock.try_open_lobby() {
                     Ok(lobby) => lobby,
                     Err(e) => {
-                        eprintln!("Error opening lobby: {}", e);
+                        error!("Error opening lobby: {}", e);
                         continue;
                     }
                 };
@@ -92,11 +93,12 @@ fn handle_stream(mut stream: TcpStream, distributer: Arc<Mutex<Distributer>>) {
 #[cfg(test)]
 mod server_tests {
     use super::*;
-    use std::thread;
     use crate::utils::ADDRESSES;
+    use std::thread;
     #[test]
     fn test_distributer() {
-        let distributer = Distributer::new(ADDRESSES[0..3].iter().map(|v| v.parse().unwrap()).collect());
+        let distributer =
+            Distributer::new(ADDRESSES[0..3].iter().map(|v| v.parse().unwrap()).collect());
         let _ = thread::spawn(move || {
             distributer.run();
         });
@@ -105,15 +107,37 @@ mod server_tests {
 
         let mut client_stream = TcpStream::connect(ADDRESSES[0]).unwrap();
         let message = DistributorClientMessages::AskForLobbies;
-        client_stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
-        let message: DistributorServerMessages = bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
+        client_stream
+            .write_all(&bincode::serialize(&message).unwrap())
+            .unwrap();
+        let message: DistributorServerMessages =
+            bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
         assert_eq!(message, DistributorServerMessages::Lobbies(vec![]));
 
         // open a lobby
         let message = DistributorClientMessages::OpenLobby;
-        client_stream.write_all(&bincode::serialize(&message).unwrap()).unwrap();
+        client_stream
+            .write_all(&bincode::serialize(&message).unwrap())
+            .unwrap();
         thread::sleep(std::time::Duration::from_secs(1));
-        let message: DistributorServerMessages = bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
-        assert_eq!(message, DistributorServerMessages::LobbyOpened(ADDRESSES[2].parse().unwrap()));
+        let message: DistributorServerMessages =
+            bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
+        assert_eq!(
+            message,
+            DistributorServerMessages::LobbyOpened(ADDRESSES[2].parse().unwrap())
+        );
+
+        // ask for lobbies again
+        let message = DistributorClientMessages::AskForLobbies;
+        client_stream
+            .write_all(&bincode::serialize(&message).unwrap())
+            .unwrap();
+        thread::sleep(std::time::Duration::from_secs(1));
+        let message: DistributorServerMessages =
+            bincode::deserialize_from(client_stream.try_clone().unwrap()).unwrap();
+        assert_eq!(
+            message,
+            DistributorServerMessages::Lobbies(vec![ADDRESSES[2].parse().unwrap()])
+        );
     }
 }
