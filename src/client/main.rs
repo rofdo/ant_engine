@@ -5,11 +5,14 @@ use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
-use vulkano::device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags};
+use vulkano::device::physical::{PhysicalDeviceType, PhysicalDevice};
+use vulkano::device::{
+    Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
+};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::{Version, VulkanLibrary};
 use vulkano::swapchain::Surface;
+use vulkano::{Version, VulkanLibrary};
 use vulkano_win::create_surface_from_winit;
 use winit::window::{Window, WindowAttributes};
 
@@ -33,13 +36,50 @@ fn get_instance() -> Arc<Instance> {
 fn get_surface(instance: Arc<Instance>) -> Arc<Surface> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = Window::new(&event_loop).expect("failed to create window");
-    let surface = create_surface_from_winit(Arc::new(window), instance).expect("failed to create surface");
+    let surface =
+        create_surface_from_winit(Arc::new(window), instance).expect("failed to create surface");
     surface
+}
+
+fn get_physical_device(
+    instance: Arc<Instance>,
+    surface: Arc<Surface>,
+) -> (Arc<PhysicalDevice>, u32) {
+    let device_extensions = DeviceExtensions {
+        khr_swapchain: true,
+        ..DeviceExtensions::empty()
+    };
+
+    let (physical_device, queue_family_index) = instance
+        .enumerate_physical_devices()
+        .expect("failed to enumerate physical devices")
+        .filter(|p| p.supported_extensions().contains(&device_extensions))
+        .filter_map(|p| {
+            p.queue_family_properties()
+                .iter()
+                .enumerate()
+                .position(|(i, q)| {
+                    q.queue_flags.contains(QueueFlags::GRAPHICS)
+                        && p.surface_support(i as u32, &surface).unwrap_or(false)
+                })
+                .map(|i| (p, i as u32))
+        })
+        .min_by_key(|(p, _)| match p.properties().device_type {
+            PhysicalDeviceType::DiscreteGpu => 0,
+            PhysicalDeviceType::IntegratedGpu => 1,
+            PhysicalDeviceType::VirtualGpu => 2,
+            PhysicalDeviceType::Cpu => 3,
+            PhysicalDeviceType::Other => 4,
+            _ => 5,
+        })
+        .expect("no suitable physical device found");
+    (physical_device, queue_family_index)
 }
 
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
     let instance = get_instance();
     let surface = get_surface(instance.clone());
+    let (physical_device, queue_family_index) = get_physical_device(instance.clone(), surface);
 
     let mut physical_devices = instance
         .enumerate_physical_devices()
