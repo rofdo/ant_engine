@@ -1,5 +1,5 @@
 use log::info;
-use vulkano::render_pass::RenderPass;
+use vulkano::image::view::ImageView;
 use std::default;
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -13,6 +13,8 @@ use vulkano::device::{
 use vulkano::image::Image;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
+use vulkano::pipeline::graphics::viewport::Viewport;
+use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
 use vulkano::{Version, VulkanLibrary};
 use vulkano_win::create_surface_from_winit;
@@ -161,7 +163,28 @@ fn get_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain>) -> Arc<Render
             depth_stencil: {},
         },
     )
-    .unwrap()
+    .expect("failed to create render pass")
+}
+
+fn window_size_dependent_setup(
+    images: &[Arc<Image>],
+    render_pass: Arc<RenderPass>,
+    viewport: &mut Viewport,
+) -> Vec<Arc<Framebuffer>> {
+    let extent = images[0].extent();
+    viewport.extent = [extent[0] as f32, extent[1] as f32];
+
+    images.iter().map(|image| {
+        let view = ImageView::new_default(image.clone()).expect("failed to create image view");
+        Framebuffer::new(
+            render_pass.clone(),
+            FramebufferCreateInfo {
+                attachments: vec![view],
+                ..Default::default()
+            },
+        )
+        .expect("failed to create framebuffer")
+    }).collect::<Vec<_>>()
 }
 
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
@@ -181,6 +204,13 @@ fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
     // Shaders would go here
     let render_pass = get_render_pass(device.clone(), swapchain.clone());
+    // Setup the Graphics Pipeline
+    let mut viewport = Viewport {
+        offset: [0.0, 0.0],
+        extent: [0.0, 0.0],
+        depth_range: (0.0..=1.0).into(),
+    };
+    let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
 
     let mut physical_devices = instance
         .enumerate_physical_devices()
