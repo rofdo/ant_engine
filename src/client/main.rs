@@ -9,9 +9,10 @@ use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
 };
+use vulkano::image::Image;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::swapchain::Surface;
+use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
 use vulkano::{Version, VulkanLibrary};
 use vulkano_win::create_surface_from_winit;
 use winit::window::{Window, WindowAttributes};
@@ -33,7 +34,7 @@ fn get_instance() -> Arc<Instance> {
     .expect("failed to create Vulkan instance")
 }
 
-fn get_surface(instance: Arc<Instance>) -> Arc<Surface> {
+fn create_surface(instance: Arc<Instance>) -> Arc<Surface> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = Window::new(&event_loop).expect("failed to create window");
     let surface =
@@ -55,6 +56,7 @@ fn get_physical_device(
                 .iter()
                 .enumerate()
                 .position(|(i, q)| {
+                    // TODO: choose the best queue family
                     q.queue_flags.contains(QueueFlags::GRAPHICS)
                         && p.surface_support(i as u32, &surface).unwrap_or(false)
                 })
@@ -72,11 +74,14 @@ fn get_physical_device(
     (physical_device, queue_family_index)
 }
 
-fn get_device(
+fn create_device(
     physical_device: Arc<PhysicalDevice>,
     queue_family_index: u32,
     device_extensions: DeviceExtensions,
-) -> (Arc<Device>, impl Iterator<Item = Arc<Queue>> + ExactSizeIterator) {
+) -> (
+    Arc<Device>,
+    impl Iterator<Item = Arc<Queue>> + ExactSizeIterator,
+) {
     Device::new(
         physical_device,
         DeviceCreateInfo {
@@ -91,15 +96,67 @@ fn get_device(
     .expect("failed to create device")
 }
 
+fn create_swapchain(
+    device: Arc<Device>,
+    surface: Arc<Surface>,
+    queue: Arc<Queue>,
+) -> (Arc<Swapchain>, Vec<Arc<Image>>) {
+    let capabilities = device
+        .physical_device()
+        .surface_capabilities(&surface, Default::default())
+        .expect("failed to get surface capabilities");
+
+    let usage = capabilities.supported_usage_flags;
+    let alpha = capabilities
+        .supported_composite_alpha
+        .into_iter()
+        .nth(0) // TODO: choose the best alpha mode
+        .unwrap();
+
+    let image_format = device
+        .physical_device()
+        .surface_formats(&surface, Default::default())
+        .expect("failed to get surface formats")
+        .iter()
+        .nth(0) //TODO: choose the best format
+        .unwrap()
+        .0;
+
+    let window = surface
+        .object()
+        .expect("failed to get surface handle")
+        .downcast_ref::<Window>()
+        .expect("failed to get window handle");
+    let image_extent: [u32; 2] = window.inner_size().into();
+
+    Swapchain::new(
+        device.clone(),
+        surface.clone(),
+        SwapchainCreateInfo {
+            min_image_count: capabilities.min_image_count,
+            image_format,
+            image_extent,
+            image_usage: usage,
+            composite_alpha: alpha,
+            ..Default::default()
+        },
+    )
+    .expect("failed to create swapchain")
+}
+
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
         ..DeviceExtensions::empty()
     };
     let instance = get_instance();
-    let surface = get_surface(instance.clone());
-    let (physical_device, queue_family_index) = get_physical_device(instance.clone(), surface, device_extensions);
-    let (device, queues) = get_device(physical_device, queue_family_index, device_extensions);
+    let surface = create_surface(instance.clone());
+    let (physical_device, queue_family_index) =
+        get_physical_device(instance.clone(), surface.clone(), device_extensions);
+    let (device, mut queues) =
+        create_device(physical_device, queue_family_index, device_extensions);
+    let queue = queues.next().expect("no queue found");
+    let (swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
 
     let mut physical_devices = instance
         .enumerate_physical_devices()
