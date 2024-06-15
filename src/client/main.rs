@@ -1,5 +1,5 @@
 use log::info;
-use vulkano::image::view::ImageView;
+use winit::event_loop;
 use std::default;
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -10,13 +10,14 @@ use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
 };
+use vulkano::image::view::ImageView;
 use vulkano::image::Image;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
-use vulkano::{Version, VulkanLibrary};
+use vulkano::{Version, VulkanLibrary, sync};
 use vulkano_win::create_surface_from_winit;
 use winit::window::{Window, WindowAttributes};
 
@@ -37,12 +38,12 @@ fn get_instance() -> Arc<Instance> {
     .expect("failed to create Vulkan instance")
 }
 
-fn create_surface(instance: Arc<Instance>) -> Arc<Surface> {
+fn create_surface(instance: Arc<Instance>) -> (Arc<Surface>, event_loop::EventLoop<()>) {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = Window::new(&event_loop).expect("failed to create window");
     let surface =
         create_surface_from_winit(Arc::new(window), instance).expect("failed to create surface");
-    surface
+    (surface, event_loop)
 }
 
 fn get_physical_device(
@@ -174,17 +175,20 @@ fn window_size_dependent_setup(
     let extent = images[0].extent();
     viewport.extent = [extent[0] as f32, extent[1] as f32];
 
-    images.iter().map(|image| {
-        let view = ImageView::new_default(image.clone()).expect("failed to create image view");
-        Framebuffer::new(
-            render_pass.clone(),
-            FramebufferCreateInfo {
-                attachments: vec![view],
-                ..Default::default()
-            },
-        )
-        .expect("failed to create framebuffer")
-    }).collect::<Vec<_>>()
+    images
+        .iter()
+        .map(|image| {
+            let view = ImageView::new_default(image.clone()).expect("failed to create image view");
+            Framebuffer::new(
+                render_pass.clone(),
+                FramebufferCreateInfo {
+                    attachments: vec![view],
+                    ..Default::default()
+                },
+            )
+            .expect("failed to create framebuffer")
+        })
+        .collect::<Vec<_>>()
 }
 
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
@@ -193,7 +197,7 @@ fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
         ..DeviceExtensions::empty()
     };
     let instance = get_instance();
-    let surface = create_surface(instance.clone());
+    let (surface, event_loop) = create_surface(instance.clone());
     let (physical_device, queue_family_index) =
         get_physical_device(instance.clone(), surface.clone(), device_extensions);
     let (device, mut queues) =
@@ -211,6 +215,13 @@ fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
         depth_range: (0.0..=1.0).into(),
     };
     let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+
+    let mut recreate_swapchain = false;
+    let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn sync::GpuFuture>);
+
+    event_loop.run(move |event, _, control_flow| match event {
+        _ => (),
+    });
 
     let mut physical_devices = instance
         .enumerate_physical_devices()
