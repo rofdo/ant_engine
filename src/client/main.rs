@@ -8,12 +8,39 @@ use vulkano::command_buffer::allocator::{
 use vulkano::device::{Device, DeviceCreateInfo, Queue, QueueCreateInfo, QueueFlags};
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::VulkanLibrary;
+use vulkano::{Version, VulkanLibrary};
+use vulkano::swapchain::Surface;
+use vulkano_win::create_surface_from_winit;
+use winit::window::{Window, WindowAttributes};
+
+fn get_instance() -> Arc<Instance> {
+    let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
+    let extensions = vulkano_win::required_extensions(&library);
+    Instance::new(
+        library,
+        InstanceCreateInfo {
+            enabled_extensions: extensions,
+            application_name: Some("Hello Triangle".into()),
+            engine_name: Some("Ant Engine".into()),
+            engine_version: 0.into(),
+            max_api_version: Some(Version::V1_1),
+            ..Default::default()
+        },
+    )
+    .expect("failed to create Vulkan instance")
+}
+
+fn get_surface(instance: Arc<Instance>) -> Arc<Surface> {
+    let event_loop = winit::event_loop::EventLoop::new();
+    let window = Window::new(&event_loop).expect("failed to create window");
+    let surface = create_surface_from_winit(Arc::new(window), instance).expect("failed to create surface");
+    surface
+}
 
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
-    let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
-    let instance = Instance::new(library, InstanceCreateInfo::default())
-        .expect("failed to create Vulkan instance");
+    let instance = get_instance();
+    let surface = get_surface(instance.clone());
+
     let mut physical_devices = instance
         .enumerate_physical_devices()
         .expect("could not enumerate physical devices");
