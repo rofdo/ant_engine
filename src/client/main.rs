@@ -1,5 +1,4 @@
 use log::info;
-use winit::event_loop;
 use std::default;
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -17,8 +16,10 @@ use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, Standar
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
-use vulkano::{Version, VulkanLibrary, sync};
+use vulkano::{sync, Version, VulkanLibrary};
 use vulkano_win::create_surface_from_winit;
+use winit::event::{Event, WindowEvent};
+use winit::event_loop::{self, ControlFlow};
 use winit::window::{Window, WindowAttributes};
 
 fn get_instance() -> Arc<Instance> {
@@ -217,10 +218,26 @@ fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
     let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
 
     let mut recreate_swapchain = false;
-    let mut previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<dyn sync::GpuFuture>);
+    let mut previous_frame_end =
+        Some(Box::new(sync::now(device.clone())) as Box<dyn sync::GpuFuture>);
 
     event_loop.run(move |event, _, control_flow| match event {
-        _ => (),
+        Event::WindowEvent {
+            event: WindowEvent::CloseRequested,
+            ..
+        } => {
+            *control_flow = ControlFlow::Exit;
+        }
+        Event::WindowEvent {
+            event: WindowEvent::Resized(_),
+            ..
+        } => {
+            recreate_swapchain = true;
+        }
+        Event::RedrawEventsCleared => {
+            // render here
+        },
+        _ => {}
     });
 
     let mut physical_devices = instance
