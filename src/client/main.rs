@@ -1,6 +1,7 @@
 use log::info;
-use std::default;
+use std::{default, thread};
 use std::sync::Arc;
+use std::time::Duration;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
@@ -16,7 +17,7 @@ use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, Standar
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
 use vulkano::swapchain::{Surface, Swapchain, SwapchainCreateInfo};
-use vulkano::{sync, Version, VulkanLibrary};
+use vulkano::{sync, Version, VulkanLibrary, VulkanError};
 use vulkano_win::create_surface_from_winit;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{self, ControlFlow};
@@ -205,7 +206,7 @@ fn main() {
     let (device, mut queues) =
         create_device(physical_device, queue_family_index, device_extensions);
     let queue = queues.next().expect("no queue found");
-    let (swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
+    let (mut swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
     let command_buffer_allocator =
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
     // Shaders would go here
@@ -222,22 +223,55 @@ fn main() {
     let mut previous_frame_end =
         Some(Box::new(sync::now(device.clone())) as Box<dyn sync::GpuFuture>);
 
-    event_loop.run(move |event, _, control_flow| match event {
-        Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } => {
-            *control_flow = ControlFlow::Exit;
+    event_loop.run(move |event, _, control_flow| {
+        // release unused resources
+        previous_frame_end
+            .as_mut()
+            .take()
+            .unwrap()
+            .cleanup_finished();
+        // chck if swapchain needs to be recreated
+        if recreate_swapchain {
+            let window = surface
+                .object()
+                .expect("failed to get surface handle")
+                .downcast_ref::<Window>()
+                .expect("failed to get window handle");
+            let image_extent: [u32; 2] = window.inner_size().into();
+
+            let (new_swapchain, new_images) = match swapchain.recreate(SwapchainCreateInfo {
+                image_extent,
+                ..swapchain.create_info()
+            }) {
+                Ok(r) => r,
+                // TODO handle ImageExtentNotSupported
+                Err(e) => {
+                    panic!("failed to recreate swapchain: {:?}", e);
+                }
+            };
+
+            swapchain = new_swapchain;
+            framebuffers = window_size_dependent_setup(&new_images, render_pass.clone(), &mut viewport);
+            recreate_swapchain = false;
+        } else {
         }
-        Event::WindowEvent {
-            event: WindowEvent::Resized(_),
-            ..
-        } => {
-            recreate_swapchain = true;
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
+                *control_flow = ControlFlow::Exit;
+            }
+            Event::WindowEvent {
+                event: WindowEvent::Resized(_),
+                ..
+            } => {
+                recreate_swapchain = true;
+            }
+            Event::RedrawEventsCleared => {
+                // render here
+            }
+            _ => {}
         }
-        Event::RedrawEventsCleared => {
-            // render here
-        }
-        _ => {}
     });
 }
