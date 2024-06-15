@@ -1,4 +1,5 @@
 use log::info;
+use vulkano::render_pass::RenderPass;
 use std::default;
 use std::sync::Arc;
 use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
@@ -144,6 +145,25 @@ fn create_swapchain(
     .expect("failed to create swapchain")
 }
 
+fn get_render_pass(device: Arc<Device>, swapchain: Arc<Swapchain>) -> Arc<RenderPass> {
+    vulkano::single_pass_renderpass!(
+        device,
+        attachments: {
+            color: {
+                format: swapchain.image_format(),
+                samples: 1,
+                load_op: Clear,
+                store_op: Store,
+            },
+        },
+        pass: {
+            color: [color],
+            depth_stencil: {},
+        },
+    )
+    .unwrap()
+}
+
 fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
@@ -157,6 +177,10 @@ fn initialize() -> (Arc<Instance>, Arc<Device>, Arc<Queue>) {
         create_device(physical_device, queue_family_index, device_extensions);
     let queue = queues.next().expect("no queue found");
     let (swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
+    let command_buffer_allocator =
+        StandardCommandBufferAllocator::new(device.clone(), Default::default());
+    // Shaders would go here
+    let render_pass = get_render_pass(device.clone(), swapchain.clone());
 
     let mut physical_devices = instance
         .enumerate_physical_devices()
