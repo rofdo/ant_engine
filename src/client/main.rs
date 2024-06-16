@@ -1,3 +1,4 @@
+use bytemuck::{Pod, Zeroable};
 use log::info;
 use std::sync::Arc;
 use std::time::Duration;
@@ -20,6 +21,7 @@ use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
 use vulkano::pipeline::graphics::viewport::Viewport;
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
+use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
 use vulkano::{sync, Validated, Version, VulkanError, VulkanLibrary};
@@ -27,7 +29,6 @@ use vulkano_win::create_surface_from_winit;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{self, ControlFlow};
 use winit::window::{Window, WindowAttributes};
-use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
@@ -35,6 +36,40 @@ struct Vertex {
     position: [f32; 3],
 }
 vulkano::impl_vertex!(Vertex, position);
+
+fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
+    mod vs {
+        vulkano_shaders::shader! {
+            ty: "vertex",
+            src: "
+            #version 450
+            layout(location = 0) in vec3 position;
+
+            void main() {
+                gl_Position = vec4(position, 1.0);
+            }
+        "
+        }
+    }
+
+    mod fs {
+        vulkano_shaders::shader! {
+            ty: "fragment",
+            src: "
+            #version 450
+            layout(location = 0) out vec4 f_color;
+
+            void main() {
+                f_color = vec4(1.0, 0.0, 0.0, 1.0);
+            }
+        "
+        }
+    }
+
+    let vs = vs::load(device.clone()).expect("failed to create shader module");
+    let fs = fs::load(device.clone()).expect("failed to create shader module");
+    (vs, fs)
+}
 
 fn get_instance() -> Arc<Instance> {
     let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
@@ -231,6 +266,7 @@ fn main() {
         depth_range: (0.0..=1.0).into(),
     };
     let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
+    let (vs, fs) = get_shader(device.clone());
 
     let mut recreate_swapchain = false;
     let mut previous_frame_end =
