@@ -46,8 +46,9 @@ use winit::window::{Window, WindowAttributes};
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
     position: [f32; 3],
+    color: [f32; 3],
 }
-vulkano::impl_vertex!(Vertex, position);
+vulkano::impl_vertex!(Vertex, position, color);
 
 fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
     mod vs {
@@ -56,9 +57,13 @@ fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
             src: "
             #version 450
             layout(location = 0) in vec3 position;
+            layout(location = 1) in vec3 color;
+
+            layout(location = 0) out vec3 out_color;
 
             void main() {
                 gl_Position = vec4(position, 1.0);
+                out_color = color;
             }
         "
         }
@@ -69,10 +74,12 @@ fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
             ty: "fragment",
             src: "
             #version 450
+            layout(location = 0) in vec3 in_color;
+
             layout(location = 0) out vec4 f_color;
 
             void main() {
-                f_color = vec4(1.0, 0.0, 0.0, 1.0);
+                f_color = vec4(in_color, 1.0);
             }
         "
         }
@@ -274,12 +281,16 @@ fn main() {
     let vertices = [
         Vertex {
             position: [-0.5, 0.5, 0.0],
+            color: [1.0, 0.0, 0.0],
         },
         Vertex {
             position: [0.5, 0.5, 0.0],
+            color: [0.0, 1.0, 0.0],
+                    
         },
         Vertex {
             position: [0.0, -0.5, 0.0],
+            color: [0.0, 0.0, 1.0],
         },
     ];
 
