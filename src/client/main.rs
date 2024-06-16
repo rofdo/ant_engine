@@ -27,6 +27,14 @@ use vulkano_win::create_surface_from_winit;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{self, ControlFlow};
 use winit::window::{Window, WindowAttributes};
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
+struct Vertex {
+    position: [f32; 3],
+}
+vulkano::impl_vertex!(Vertex, position);
 
 fn get_instance() -> Arc<Instance> {
     let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
