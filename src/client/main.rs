@@ -19,8 +19,20 @@ use vulkano::image::view::ImageView;
 use vulkano::image::Image;
 use vulkano::instance::{Instance, InstanceCreateInfo};
 use vulkano::memory::allocator::{AllocationCreateInfo, MemoryTypeFilter, StandardMemoryAllocator};
-use vulkano::pipeline::graphics::viewport::Viewport;
-use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass};
+use vulkano::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
+use vulkano::pipeline::graphics::input_assembly::InputAssemblyState;
+use vulkano::pipeline::graphics::multisample::MultisampleState;
+use vulkano::pipeline::graphics::rasterization::RasterizationState;
+use vulkano::pipeline::graphics::vertex_input::{
+    BuffersDefinition, VertexDefinition, VertexInputState,
+};
+use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
+use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
+use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
+use vulkano::pipeline::{
+    DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+};
+use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass};
 use vulkano::shader::ShaderModule;
 use vulkano::swapchain::{self, Surface, Swapchain, SwapchainCreateInfo, SwapchainPresentInfo};
 use vulkano::sync::GpuFuture;
@@ -257,16 +269,52 @@ fn main() {
     let (mut swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
     let command_buffer_allocator =
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
-    // Shaders would go here
+
+    let (vs, fs) = get_shader(device.clone());
     let render_pass = get_render_pass(device.clone(), swapchain.clone());
-    // Setup the Graphics Pipeline
+    let vs = vs.entry_point("main").expect("failed to get entry point");
+    let fs = fs.entry_point("main").expect("failed to get entry point");
+    let vertex_input_state = <Vertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex()
+        .definition(&vs.info().output_interface)
+        .expect("failed to get vertex input state");
+    let stages = [
+        PipelineShaderStageCreateInfo::new(vs),
+        PipelineShaderStageCreateInfo::new(fs),
+    ];
+    let subpass = Subpass::from(render_pass.clone(), 0).expect("failed to get subpass");
+    let layout = PipelineLayout::new(
+        device.clone(),
+        PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
+            .into_pipeline_layout_create_info(device.clone())
+            .expect("failed to create pipeline layout"),
+    )
+    .expect("failed to create pipeline layout");
+    let pipeline = GraphicsPipeline::new(
+        device.clone(),
+        None,
+        GraphicsPipelineCreateInfo {
+            stages: stages.into_iter().collect(),
+            vertex_input_state: Some(vertex_input_state),
+            input_assembly_state: Some(InputAssemblyState::default()),
+            viewport_state: Some(ViewportState::default()),
+            rasterization_state: Some(RasterizationState::default()),
+            multisample_state: Some(MultisampleState::default()),
+            color_blend_state: Some(ColorBlendState::with_attachment_states(
+                subpass.num_color_attachments(),
+                ColorBlendAttachmentState::default(),
+            )),
+            dynamic_state: [DynamicState::Viewport].into_iter().collect(),
+            subpass: Some(subpass.into()),
+            ..GraphicsPipelineCreateInfo::layout(layout)
+        },
+    );
+
     let mut viewport = Viewport {
         offset: [0.0, 0.0],
         extent: [0.0, 0.0],
         depth_range: (0.0..=1.0).into(),
     };
     let mut framebuffers = window_size_dependent_setup(&images, render_pass.clone(), &mut viewport);
-    let (vs, fs) = get_shader(device.clone());
 
     let mut recreate_swapchain = false;
     let mut previous_frame_end =
