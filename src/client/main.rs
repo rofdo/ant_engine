@@ -305,7 +305,7 @@ fn main() {
     let fs = fs.entry_point("main").expect("failed to get entry point");
     let vertex_input_state =
         <Vertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex()
-            .definition(&vs.info().output_interface)
+            .definition(&vs.info().input_interface)
             .expect("failed to get vertex input state");
     let stages = [
         PipelineShaderStageCreateInfo::new(vs),
