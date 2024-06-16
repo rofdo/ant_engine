@@ -269,19 +269,48 @@ fn main() {
     let (mut swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
     let command_buffer_allocator =
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
+    let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+
+    let vertices = [
+        Vertex {
+            position: [-0.5, 0.5, 0.0],
+        },
+        Vertex {
+            position: [0.5, 0.5, 0.0],
+        },
+        Vertex {
+            position: [0.0, -0.5, 0.0],
+        },
+    ];
+
+    let vertex_buffer = Buffer::from_iter(
+        memory_allocator,
+        BufferCreateInfo {
+            usage: BufferUsage::VERTEX_BUFFER,
+            ..Default::default()
+        },
+        AllocationCreateInfo {
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+        vertices,
+    )
+    .expect("failed to create vertex buffer");
 
     let (vs, fs) = get_shader(device.clone());
     let render_pass = get_render_pass(device.clone(), swapchain.clone());
+    let subpass = Subpass::from(render_pass.clone(), 0).expect("failed to get subpass");
     let vs = vs.entry_point("main").expect("failed to get entry point");
     let fs = fs.entry_point("main").expect("failed to get entry point");
-    let vertex_input_state = <Vertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex()
-        .definition(&vs.info().output_interface)
-        .expect("failed to get vertex input state");
+    let vertex_input_state =
+        <Vertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex()
+            .definition(&vs.info().output_interface)
+            .expect("failed to get vertex input state");
     let stages = [
         PipelineShaderStageCreateInfo::new(vs),
         PipelineShaderStageCreateInfo::new(fs),
     ];
-    let subpass = Subpass::from(render_pass.clone(), 0).expect("failed to get subpass");
     let layout = PipelineLayout::new(
         device.clone(),
         PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
@@ -307,7 +336,8 @@ fn main() {
             subpass: Some(subpass.into()),
             ..GraphicsPipelineCreateInfo::layout(layout)
         },
-    );
+    )
+    .expect("failed to create pipeline");
 
     let mut viewport = Viewport {
         offset: [0.0, 0.0],
@@ -406,6 +436,14 @@ fn main() {
                         },
                     )
                     .unwrap()
+                    .set_viewport(0, vec![viewport.clone()].into())
+                    .expect("failed to set viewport")
+                    .bind_pipeline_graphics(pipeline.clone())
+                    .expect("failed to bind pipeline")
+                    .bind_vertex_buffers(0, vertex_buffer.clone())
+                    .expect("failed to bind vertex buffer")
+                    .draw(vertex_buffer.len() as u32, 1, 0, 0)
+                    .expect("failed to draw")
                     .end_render_pass(vulkano::command_buffer::SubpassEndInfo {
                         ..Default::default()
                     })
