@@ -114,12 +114,6 @@ mod fs {
     }
 }
 
-fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
-    let vs = vs::load(device.clone()).expect("failed to create shader module");
-    let fs = fs::load(device.clone()).expect("failed to create shader module");
-    (vs, fs)
-}
-
 fn get_instance() -> Arc<Instance> {
     let library = VulkanLibrary::new().expect("no local Vulkan library/DLL");
     let extensions = vulkano_win::required_extensions(&library);
@@ -346,7 +340,8 @@ fn main() {
     let render_pass = get_render_pass(device.clone(), swapchain.clone());
     let subpass = Subpass::from(render_pass.clone(), 0).expect("failed to get subpass");
 
-    let (vs, fs) = get_shader(device.clone());
+    let vs = vs::load(device.clone()).expect("failed to create shader module");
+    let fs = fs::load(device.clone()).expect("failed to create shader module");
     let vs_entry_point = vs.entry_point("main").expect("failed to get entry point");
     let fs_entry_point = fs.entry_point("main").expect("failed to get entry point");
 
