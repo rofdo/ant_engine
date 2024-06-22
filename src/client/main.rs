@@ -1,6 +1,6 @@
 use bytemuck::{Pod, Zeroable};
 use log::info;
-use nalgebra_glm::TMat4;
+use nalgebra_glm::{half_pi, perspective, TMat4};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{default, thread};
@@ -309,15 +309,15 @@ fn main() {
 
     let vertices = [
         Vertex {
-            position: [-0.5, 0.5, 0.0],
+            position: [-0.5, 0.5, -1.0],
             color: [1.0, 0.0, 0.0],
         },
         Vertex {
-            position: [0.5, 0.5, 0.0],
+            position: [0.5, 0.5, -1.0],
             color: [0.0, 1.0, 0.0],
         },
         Vertex {
-            position: [0.0, -0.5, 0.0],
+            position: [0.0, -0.5, -1.0],
             color: [0.0, 0.0, 1.0],
         },
     ];
@@ -455,7 +455,18 @@ fn main() {
                 }
 
                 let uniform_subbuffer = {
-                    let mvp = MVP::new();
+                    let mut mvp = MVP::new();
+
+                    let window = surface
+                        .object()
+                        .expect("failed to get surface handle")
+                        .downcast_ref::<Window>()
+                        .expect("failed to get window handle");
+                    let image_extent: [u32; 2] = window.inner_size().into();
+
+                    let aspect_ratio = image_extent[0] as f32 / image_extent[1] as f32;
+                    mvp.projection = perspective(aspect_ratio, half_pi(), 0.5, 100.0);
+
                     let uniform_data = vs::MVP {
                         model: mvp.model.into(),
                         view: mvp.view.into(),
