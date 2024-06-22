@@ -1,9 +1,11 @@
 use bytemuck::{Pod, Zeroable};
 use log::info;
+use nalgebra_glm::TMat4;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{default, thread};
-use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage};
+use vulkano::buffer::allocator::{SubbufferAllocator, SubbufferAllocatorCreateInfo};
+use vulkano::buffer::{Buffer, BufferCreateInfo, BufferUsage, Subbuffer};
 use vulkano::command_buffer::allocator::{
     StandardCommandBufferAllocator, StandardCommandBufferAllocatorCreateInfo,
 };
@@ -11,6 +13,10 @@ use vulkano::command_buffer::{
     AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo,
     SubpassContents,
 };
+use vulkano::descriptor_set::allocator::{
+    StandardDescriptorSetAllocator, StandardDescriptorSetAllocatorCreateInfo,
+};
+use vulkano::descriptor_set::{PersistentDescriptorSet, WriteDescriptorSet};
 use vulkano::device::physical::{PhysicalDevice, PhysicalDeviceType};
 use vulkano::device::{
     Device, DeviceCreateInfo, DeviceExtensions, Queue, QueueCreateInfo, QueueFlags,
@@ -30,7 +36,7 @@ use vulkano::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vulkano::pipeline::graphics::GraphicsPipelineCreateInfo;
 use vulkano::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vulkano::pipeline::{
-    DynamicState, GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo,
+    DynamicState, GraphicsPipeline, Pipeline, PipelineLayout, PipelineShaderStageCreateInfo,
 };
 use vulkano::render_pass::{Framebuffer, FramebufferCreateInfo, RenderPass, Subpass};
 use vulkano::shader::ShaderModule;
@@ -42,6 +48,23 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{self, ControlFlow};
 use winit::window::{Window, WindowAttributes};
 
+#[derive(Debug, Clone)]
+struct MVP {
+    model: TMat4<f32>,
+    view: TMat4<f32>,
+    projection: TMat4<f32>,
+}
+
+impl MVP {
+    fn new() -> Self {
+        Self {
+            model: TMat4::identity(),
+            view: TMat4::identity(),
+            projection: TMat4::identity(),
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Zeroable, Pod)]
 struct Vertex {
@@ -50,29 +73,35 @@ struct Vertex {
 }
 vulkano::impl_vertex!(Vertex, position, color);
 
-fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
-    mod vs {
-        vulkano_shaders::shader! {
-            ty: "vertex",
-            src: "
+mod vs {
+    vulkano_shaders::shader! {
+        ty: "vertex",
+        src: "
             #version 450
             layout(location = 0) in vec3 position;
             layout(location = 1) in vec3 color;
 
             layout(location = 0) out vec3 out_color;
 
+            layout(set = 0, binding = 0) uniform MVP {
+                mat4 model;
+                mat4 view;
+                mat4 projection;
+            } uniforms;
+
             void main() {
-                gl_Position = vec4(position, 1.0);
+                mat4 worldview = uniforms.view * uniforms.model;
+                gl_Position = vec4(position, 1.0) * worldview * uniforms.projection;
                 out_color = color;
             }
         "
-        }
     }
+}
 
-    mod fs {
-        vulkano_shaders::shader! {
-            ty: "fragment",
-            src: "
+mod fs {
+    vulkano_shaders::shader! {
+        ty: "fragment",
+        src: "
             #version 450
             layout(location = 0) in vec3 in_color;
 
@@ -82,9 +111,10 @@ fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
                 f_color = vec4(in_color, 1.0);
             }
         "
-        }
     }
+}
 
+fn get_shader(device: Arc<Device>) -> (Arc<ShaderModule>, Arc<ShaderModule>) {
     let vs = vs::load(device.clone()).expect("failed to create shader module");
     let fs = fs::load(device.clone()).expect("failed to create shader module");
     (vs, fs)
@@ -276,7 +306,12 @@ fn main() {
     let (mut swapchain, images) = create_swapchain(device.clone(), surface.clone(), queue.clone());
     let command_buffer_allocator =
         StandardCommandBufferAllocator::new(device.clone(), Default::default());
+
     let memory_allocator = Arc::new(StandardMemoryAllocator::new_default(device.clone()));
+    let describtor_set_allocator = StandardDescriptorSetAllocator::new(
+        device.clone(),
+        StandardDescriptorSetAllocatorCreateInfo::default(),
+    );
 
     let vertices = [
         Vertex {
@@ -286,7 +321,6 @@ fn main() {
         Vertex {
             position: [0.5, 0.5, 0.0],
             color: [0.0, 1.0, 0.0],
-                    
         },
         Vertex {
             position: [0.0, -0.5, 0.0],
@@ -295,7 +329,7 @@ fn main() {
     ];
 
     let vertex_buffer = Buffer::from_iter(
-        memory_allocator,
+        memory_allocator.clone(),
         BufferCreateInfo {
             usage: BufferUsage::VERTEX_BUFFER,
             ..Default::default()
@@ -309,19 +343,33 @@ fn main() {
     )
     .expect("failed to create vertex buffer");
 
-    let (vs, fs) = get_shader(device.clone());
     let render_pass = get_render_pass(device.clone(), swapchain.clone());
     let subpass = Subpass::from(render_pass.clone(), 0).expect("failed to get subpass");
-    let vs = vs.entry_point("main").expect("failed to get entry point");
-    let fs = fs.entry_point("main").expect("failed to get entry point");
+
+    let (vs, fs) = get_shader(device.clone());
+    let vs_entry_point = vs.entry_point("main").expect("failed to get entry point");
+    let fs_entry_point = fs.entry_point("main").expect("failed to get entry point");
+
+    let uniform_buffer = SubbufferAllocator::new(
+        memory_allocator.clone(),
+        SubbufferAllocatorCreateInfo {
+            buffer_usage: BufferUsage::UNIFORM_BUFFER,
+            memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
+                | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            ..Default::default()
+        },
+    );
+
     let vertex_input_state =
         <Vertex as vulkano::pipeline::graphics::vertex_input::Vertex>::per_vertex()
-            .definition(&vs.info().input_interface)
+            .definition(&vs_entry_point.info().input_interface)
             .expect("failed to get vertex input state");
+
     let stages = [
-        PipelineShaderStageCreateInfo::new(vs),
-        PipelineShaderStageCreateInfo::new(fs),
+        PipelineShaderStageCreateInfo::new(vs_entry_point),
+        PipelineShaderStageCreateInfo::new(fs_entry_point),
     ];
+
     let layout = PipelineLayout::new(
         device.clone(),
         PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
@@ -411,6 +459,34 @@ fn main() {
                     recreate_swapchain = false;
                 }
 
+                let uniform_subbuffer = {
+                    let mvp = MVP::new();
+                    let uniform_data = vs::MVP {
+                        model: mvp.model.into(),
+                        view: mvp.view.into(),
+                        projection: mvp.projection.into(),
+                    };
+
+                    let uniform_subbuffer = uniform_buffer
+                        .allocate_sized()
+                        .expect("failed to allocate uniform buffer");
+                    *uniform_subbuffer.write().unwrap() = uniform_data;
+
+                    uniform_subbuffer
+                };
+                let layout = pipeline
+                    .layout()
+                    .set_layouts()
+                    .get(0)
+                    .expect("failed to get layout 0");
+                let set = PersistentDescriptorSet::new(
+                    &describtor_set_allocator,
+                    layout.clone(),
+                    [WriteDescriptorSet::buffer(0, uniform_subbuffer)],
+                    [],
+                )
+                .expect("failed to create descriptor set");
+
                 let (image_index, suboptimal, acquire_future) =
                     match swapchain::acquire_next_image(swapchain.clone(), None) {
                         Ok(r) => r,
@@ -451,6 +527,13 @@ fn main() {
                     .expect("failed to set viewport")
                     .bind_pipeline_graphics(pipeline.clone())
                     .expect("failed to bind pipeline")
+                    .bind_descriptor_sets(
+                        vulkano::pipeline::PipelineBindPoint::Graphics,
+                        pipeline.layout().clone(),
+                        0,
+                        set.clone(),
+                    )
+                    .expect("failed to bind descriptor set")
                     .bind_vertex_buffers(0, vertex_buffer.clone())
                     .expect("failed to bind vertex buffer")
                     .draw(vertex_buffer.len() as u32, 1, 0, 0)
