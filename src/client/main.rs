@@ -1,6 +1,10 @@
 use bytemuck::{Pod, Zeroable};
+use log::debug;
 use log::info;
-use nalgebra_glm::{half_pi, perspective, TMat4};
+use nalgebra_glm::rotate_x;
+use nalgebra_glm::{
+    half_pi, identity, look_at, perspective, pi, rotate_normalized_axis, translate, vec3, TMat4,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{default, thread};
@@ -91,7 +95,7 @@ mod vs {
 
             void main() {
                 mat4 worldview = uniforms.view * uniforms.model;
-                gl_Position = vec4(position, 1.0) * worldview * uniforms.projection;
+                gl_Position = uniforms.projection * worldview * vec4(position, 1.0);
                 out_color = color;
             }
         "
@@ -286,6 +290,14 @@ fn window_size_dependent_setup(
 
 fn main() {
     env_logger::init();
+    let mut mvp = MVP::new();
+    mvp.view = look_at(
+        &vec3(0.0, 0.0, 0.1),
+        &vec3(0.0, 0.0, 0.0),
+        &vec3(0.0, 1.0, 0.0),
+    );
+    mvp.model = translate(&identity(), &vec3(0.0, 0.0, -1.0));
+
     let device_extensions = DeviceExtensions {
         khr_swapchain: true,
         ..DeviceExtensions::empty()
@@ -309,15 +321,15 @@ fn main() {
 
     let vertices = [
         Vertex {
-            position: [-0.5, 0.5, -1.0],
+            position: [-0.5, 0.5, 0.0],
             color: [1.0, 0.0, 0.0],
         },
         Vertex {
-            position: [0.5, 0.5, -1.0],
+            position: [0.5, 0.5, 0.0],
             color: [0.0, 1.0, 0.0],
         },
         Vertex {
-            position: [0.0, -0.5, -1.0],
+            position: [0.0, -0.5, 0.0],
             color: [0.0, 0.0, 1.0],
         },
     ];
@@ -404,6 +416,8 @@ fn main() {
     let mut previous_frame_end =
         Some(Box::new(sync::now(device.clone())) as Box<dyn sync::GpuFuture>);
 
+    let start_time = std::time::Instant::now();
+
     event_loop.run(move |event, _, control_flow| {
         match event {
             Event::WindowEvent {
@@ -434,6 +448,9 @@ fn main() {
                         .expect("failed to get window handle");
                     let image_extent: [u32; 2] = window.inner_size().into();
 
+                    let aspect_ratio = image_extent[0] as f32 / image_extent[1] as f32;
+                    mvp.projection = perspective(aspect_ratio, half_pi(), 0.01, 100.0);
+
                     let (new_swapchain, new_images) =
                         match swapchain.recreate(SwapchainCreateInfo {
                             image_extent,
@@ -455,17 +472,24 @@ fn main() {
                 }
 
                 let uniform_subbuffer = {
-                    let mut mvp = MVP::new();
+                    let elapsed = start_time.elapsed().as_secs_f64()
+                        + start_time.elapsed().subsec_nanos() as f64 * 1e-9;
 
-                    let window = surface
-                        .object()
-                        .expect("failed to get surface handle")
-                        .downcast_ref::<Window>()
-                        .expect("failed to get window handle");
-                    let image_extent: [u32; 2] = window.inner_size().into();
-
-                    let aspect_ratio = image_extent[0] as f32 / image_extent[1] as f32;
-                    mvp.projection = perspective(aspect_ratio, half_pi(), 0.5, 100.0);
+                    let elapsed_as_radians = elapsed * pi::<f64>() / 180.0 * 30.0;
+                    debug!("elapsed: {}", elapsed_as_radians);
+                    let model = rotate_x(
+                        &mvp.model,
+                        2.5,
+                        // elapsed_as_radians as f32,
+                        // &vec3(0.0, 10.0, 1.0),
+                    );
+                    let model = [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                    ];
+                    debug!("model: {:?}", model);
 
                     let uniform_data = vs::MVP {
                         model: mvp.model.into(),
